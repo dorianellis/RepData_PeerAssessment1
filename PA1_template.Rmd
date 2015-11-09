@@ -5,21 +5,204 @@ output:
     keep_md: true
 ---
 
-
 ## Loading and preprocessing the data
+1. Unzip and load the source data file  
+```{r loaddata}
+## Unzip the source file
+unzip("activity.zip")
 
+## Load it in
+sourceData <- read.csv("activity.csv")
 
-
+## Examine the first few rows
+head(sourceData)
+```
+2. No transformation of data required as it appears well structured with NA used for missing values.
+  
 ## What is mean total number of steps taken per day?
+1. Table showing daily total step count:
+```{r dailytotalsteps, results='asis'}
+## First create an aggregated(sum) dataset at interval level
+dailyAggSteps <- setNames(
+                                aggregate(sourceData$steps, list(sourceData$date), sum), 
+                                c("Date", "Steps")
+                        )
+
+## Load the xtable library for neat display
+library(xtable)
+
+## Create the table of data
+xt <- xtable(dailyAggSteps, pad=TRUE)
+
+## And display it
+print(xt, type="html")
+```
+  
+  
+2. Historgram of the above data showing the daily total step counts:  
+```{r totalshistogram}
+## Draw the histogram chart
+with(dailyAggSteps, {
+    par(las=2, mar=c(7,5,3,3), mgp=c(4,1,0))
+    barplot(
+        height=Steps,
+        main="Total steps per day",
+        xlab="Dates",
+        cex.names=0.6,
+        ylab="Step count",
+        names.arg=Date,
+        space=c(0)
+    )
+})
+```
+
+
+3. Calculate the mean and median total of steps per day (ignoring NA values):  
+```{r meanmediancalcs}
+## Calculate the mean from the daily aggregate dataset
+dailyMeanSteps <- mean(dailyAggSteps$Steps, na.rm = TRUE)
+
+## Calculate the median from the daily aggregate dataset
+dailyMedianSteps <- median(dailyAggSteps$Steps, na.rm = TRUE)
+```
+  
+The mean is **`r format(dailyMeanSteps, digits=6)`** and the median value is **`r dailyMedianSteps`**
 
 
 
 ## What is the average daily activity pattern?
 
+1. A timeseries plot showing the average step count per interval:
+```{r averagedailtyactivity}
+## First create an aggregated(mean) dataset at interval level
+intervalMeanSteps <- setNames(
+                                aggregate(data=sourceData, steps~interval, FUN=mean, na.action=na.omit),
+                                c("Interval", "MeanSteps")
+                        )
+
+## And then plot the result as a timeseries
+with(intervalMeanSteps, {
+    plot(
+        x=Interval,
+        y=MeanSteps,
+        type="l",
+        main="Average steps per interval across whole period",
+        xlab="Interval",
+        ylab="Mean step count"
+        
+    )
+})
+```
+  
+  
+2. Find the 5-minute interval with the maximum number of steps
+```{r maxstepinterval}
+## Calculate the max value
+intervalMax <- intervalMeanSteps[intervalMeanSteps$MeanSteps==max(intervalMeanSteps$MeanSteps),]
+```
+The maximum average step count occurs in interval **`r intervalMax$Interval`** to **`r intervalMax$Interval+5`** with an average **`r format(intervalMax$MeanSteps, digits=5)`** steps.
 
 
 ## Imputing missing values
 
+1. Count of the number of rows with missing values:
+```{r missingvalues}
+## Do the calculation
+countNA <- nrow(subset(sourceData, is.na(sourceData$steps)))
+```
+  
+There are **`r countNA`** rows with missing values.
+  
+2. We'll use the previously calculated 5-minute interval average step counts to replace NA values.
+3. Create the new dataset with the missing data filled in:
+```{r imputemissingvalues}
+##First get the original step counts into a dataframe
+stepCountValues <- data.frame(sourceData$steps)
 
+## Use tapply to find and replace NA values with corresponding averages (rounded up to full steps)
+stepCountValues[is.na(stepCountValues),] <- 
+        ceiling(tapply(X=sourceData$steps, INDEX=sourceData$interval, FUN=mean, na.rm=TRUE))
+
+## Bind the new and original data into an imputed dataset
+imputedData <- setNames(
+                                cbind(stepCountValues, sourceData[,2:3]),
+                                c("Steps", "Date", "Interval")
+                        )
+
+## Examine the resulting dataset
+head(imputedData)
+```
+
+4. A historgram showing the new daily total step counts: 
+```{r newdailymeansteps}
+## Firast create an aggregated(sum) dataset at day level for imputed dataset
+newDailyAggSteps <- setNames(
+                                aggregate(imputedData$Steps, list(imputedData$Date), sum), 
+                                c("Date", "Steps")
+                        )
+## Calculate the mean and median total of steps per day (missing values imputed)
+newDailyMeanSteps <- mean(newDailyAggSteps$Steps, na.rm = TRUE)
+newDailyMedianSteps <- median(newDailyAggSteps$Steps, na.rm = TRUE)
+
+## Now draw a historgram showing the new daily total step counts 
+with(newDailyAggSteps, {
+    par(las=2, mar=c(7,5,3,3), mgp=c(4,1,0))
+    barplot(
+        height=Steps,
+        main="Total steps per day",
+        xlab="Dates",
+        cex.names=0.6,
+        ylab="Step count",
+        names.arg=Date,
+        space=c(0)
+    )
+})
+```
+
+Replacing missing values with the interval average caused both mean and median values to increase with the Mean going from **`r format(dailyMeanSteps, digits=6)`** to **`r format(newDailyMeanSteps, digits=6)`** and the Median going from **`r format(dailyMedianSteps, digits=5)`** to **`r format(newDailyMedianSteps, digits=5)`**.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+  
+1. Classify the rows by day type; weekday or weekend and calculate average steps by that classification.
+```{r classifybydaytype}
+## Use tapply and custom func to classify dates as weekday or weekend and add to dataframe
+dateDayClass <- data.frame(sapply(X = imputedData$Date, FUN = 
+                        function(day) {
+                                if (weekdays(as.Date(day)) %in% 
+                                    c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")) {
+                                        day <- "weekday"
+                                } 
+                                else {
+                                        day <- "weekend"
+                                }
+                        }
+                ))
+## Bind result back to target dataset and name the cols
+newDataWithDayClass <- setNames(cbind(imputedData, dateDayClass),
+                                c("Steps", "Date", "Interval", "DayClass"))
+
+## Calculate the mean number of steps by interval by day classification:
+dayClassMeanIntSteps <- aggregate(
+    data=newDataWithDayClass,
+    Steps ~ DayClass + Interval,
+    FUN=mean
+)
+
+## Examine the result
+head(dayClassMeanIntSteps)
+```
+
+2. Timeseries panel plot showing the average step count per interval for both weekday and weekend day classes:
+```{r panelplotbydayclass}
+## Load the lattice package
+library("lattice")
+## Create the panel plot
+xyplot(
+    type="l",
+    data=dayClassMeanIntSteps,
+    Steps ~ Interval | DayClass,
+    xlab="Interval",
+    ylab="Mean step count",
+    layout=c(1,2)
+)
+```
